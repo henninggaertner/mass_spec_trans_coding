@@ -8,6 +8,12 @@ import sys
 import warnings
 from collections import OrderedDict
 from functools import partial
+import pandas as pd
+from sklearn.model_selection import GroupShuffleSplit
+import re
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, InputLayer
+from scikeras.wrappers import KerasClassifier
 
 import pandas as pd
 import numpy as np
@@ -29,6 +35,7 @@ from mstc.processing import Flatten, Stacker
 
 assert sys.version_info >= (3, 6)
 
+pattern = re.compile("CP+\d+")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -76,6 +83,37 @@ PATTERN = re.compile(
     r'\.png'
 )
 
+def create_model():
+    model = Sequential()
+    model.add(InputLayer(input_shape=(936,)))
+    model.add(Dense(512, activation='relu'))
+    model.add(Dense(64, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
+    model.compile(loss='binary_crossentropy', optimizer='adam')
+    return model
+
+def homogenize_names(sample_name):
+    # if CP\d is encountered, replace it with CPP\d
+    sample_name = re.sub(r'CP(\d+)', r'CPP\1', sample_name)
+    # if string contains guot in any case, remove it
+    sample_name = re.sub(r'guot(_)+', '', sample_name, flags=re.IGNORECASE)
+    # if string has \d+_PC\d, replace it with PC\d_\d+
+    sample_name = re.sub(r'(\d+)_PC(\d+)', r'PC\2_\1', sample_name, flags=re.IGNORECASE)
+    # cast to lowercase
+    sample_name = sample_name.lower()
+    return sample_name
+
+def train_test_split_grouped(index, group_mapping, test_size=0.2, random_state=None):
+    groups = [group_mapping[sample] for sample in index]
+    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
+    train_idx, test_idx = next(gss.split(index, groups=groups))
+    train, test = index[train_idx], index[test_idx]
+
+    group_1 = [group_mapping[sample] for sample in train]
+    group_2 = [group_mapping[sample] for sample in test]
+    assert len(set(group_1).intersection(set(group_2))) == 0
+    return train, test
+
 # collected from NotUniqueError on calling `match_samplename`
 DUPLICATE_PPPB_ID = {
     'guot_PC1_170127_CPP24_sw': ['PPPB534', 'PPPB1071'],
@@ -103,6 +141,8 @@ DUPLICATE_PPPB_ID = {
     'guot_PC3_170202_CPP280_sw': ['PPPB1442', 'PPPB1467'],
     'guot_PC3_170202_CPP283_sw': ['PPPB1091', 'PPPB1113']
 }
+# homogenize the duplicate pppb ids
+DUPLICATE_PPPB_ID = {homogenize_names(k): v for k, v in DUPLICATE_PPPB_ID.items()}
 
 
 class NotUniqueError(Exception):
@@ -121,11 +161,11 @@ def match_samplename(samplename, pppb_mapping):
     """translate samplename to pppb id
     treat badly behaved samplenames and duplicates"""
     # correct common mistakes
-    samplename = samplename.upper().replace(
-        '__', '_'
-    ).replace(
-        '_PC3_170220_CP', '_PC3_170220_CPP'
-    )
+    # samplename = samplename.upper().replace(
+    #     '__', '_'
+    # ).replace(
+    #     '_PC3_170220_CP', '_PC3_170220_CPP'
+    # )
     # badly placed "PC6" (no such files as of now)?
     mapped = pppb_mapping[samplename]
 
@@ -245,6 +285,7 @@ PARAMETER_GRID = {
 def run_all_encodings_on_all_modalities(
     annotation_csv, index_csv, expression_directory,
     encoded_directory, output_directory,
+    patient_mapping,
     all_modalities, cohort_identifier,
     module='all', classifier='all',
     n_jobs=1
@@ -260,7 +301,12 @@ def run_all_encodings_on_all_modalities(
         os.path.abspath(os.path.expanduser(annotation_csv)),
         index_col=0
         ).set_index("PPPB_ID")
-    pppb_mapping = annotation_df.reset_index().set_index("Raw_ID")["PPPB_ID"]
+    annotation_df['Raw_ID'] = annotation_df['Raw_ID'].apply(homogenize_names)
+    patient_mapping =pd.read_excel(patient_mapping, engine='openpyxl', skiprows=1, index_col=0)['ID']
+    pppb_mapping = annotation_df
+    pppb_mapping['Raw_ID'] = pppb_mapping['Raw_ID'].apply(homogenize_names)
+    pppb_mapping = pppb_mapping.reset_index().set_index("Raw_ID")["PPPB_ID"]
+
     # ordered selection of valid samples
     y = pd.read_csv(
         os.path.abspath(os.path.expanduser(index_csv)),
@@ -314,6 +360,11 @@ def run_all_encodings_on_all_modalities(
             XGBClassifier(),
             subdict(PARAMETER_GRID, ['n_estimators']),
         ),
+        '3LP': classifier_pipeline(
+            KerasClassifier(build_fn=create_model, epochs=100, batch_size=10, verbose=0),
+            {},
+        )
+
     }
     if classifier_selection != 'all':
         classifiers = {classifier_selection: classifiers[classifier_selection]}
@@ -342,6 +393,7 @@ def run_all_encodings_on_all_modalities(
 
         glob_pattern = f'{cohort_identifier}-{module}-{modality}.nc'
         encoded_modalities = []
+        patient_id_mapping = {}
         for filepath in glob.glob(os.path.join(data_dir, glob_pattern)):
             encoded_array = xr.open_dataarray(filepath)
             modality = encoded_array.name.split('-')[2]
@@ -351,6 +403,8 @@ def run_all_encodings_on_all_modalities(
                 .split('/')[-1]
                 for sample_filename in encoded_array.indexes['sample']
             ]
+            sample_index = [homogenize_names(sample) for sample in sample_index]
+            # patient_ids = ["" if "CPP" not in sample else pattern.search(sample).group() for sample in sample_index]
             encoded_array = encoded_array.assign_coords(sample=sample_index)
 
             encoded_modalities.append((modality, encoded_array))
@@ -374,19 +428,37 @@ def run_all_encodings_on_all_modalities(
         encoded_module = encoded_module.drop(
             list(DUPLICATE_PPPB_ID.keys()), dim='sample'
         )
+
+        patient_index = [patient_mapping[sample] for sample in encoded_module.indexes['sample']]
         pppb_index = [
             match_samplename(sample, pppb_mapping)
             for sample in encoded_module.indexes['sample']
         ]
+        #patient_id_mapping = {pppb: patient_id_mapping[sample] for sample, pppb in zip(encoded_module.indexes['sample'], pppb_index)}
         encoded_module = encoded_module.assign_coords(sample=pppb_index)
+        pppb_to_patient = {pppb: patient for pppb, patient in zip(pppb_index, patient_index)}
         encoded_module = Flatten(dim_to_keep='sample')(encoded_module)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            encoded_module.loc[index].values, y,
-            test_size=0.3,
-            random_state=RANDOM_STATE,
-            stratify=y
+        # drop the samples with who's patient has "CTRL" in the string, via the mapping
+        encoded_module = encoded_module.drop(
+            [sample for sample, patient in pppb_to_patient.items() if 'CTRL' in patient], dim='sample'
         )
+        index = encoded_module.indexes['sample']
+        # OLD DIRTY SPLIT
+        #X_train, X_test, y_train, y_test = train_test_split(
+        #    encoded_module.loc[index].values, y,
+        #    test_size=0.3,
+        #    random_state=RANDOM_STATE,
+        #    stratify=y
+        #)
+        # NEW SPLIT
+        train_index, test_index = train_test_split_grouped(index, pppb_to_patient, test_size=0.3, random_state=RANDOM_STATE)
+        X_train = encoded_module.loc[train_index].values
+        X_test = encoded_module.loc[test_index].values
+        y_train = y.loc[train_index]
+        y_test = y.loc[test_index]
+
+
         encoded_image_size = sizedict(
             encoded_module.attrs['encoded_image_size']
         )
@@ -518,4 +590,29 @@ def run_all_encodings_on_all_modalities(
 
 
 if __name__ == "__main__":
-    plac.call(run_all_encodings_on_all_modalities)
+    data_dir = "/home/henning/mass_spec_trans_coding/data/" # TODO magic path
+    annotation_csv = data_dir+"annotation.csv"
+    index_csv = data_dir+"index.csv"
+    expression_directory = data_dir+"expression"
+    encoded_directory = data_dir+"resnet_v2_101"
+    output_directory = data_dir+"output"
+    patient_mapping = data_dir+"inline-supplementary-material-5.xlsx"
+
+    # Set the module to 'resnet_v2_50' and cohort_identifier to the directory name of the 512x12 encoded data
+    module = 'resnet_v2_101'
+    cohort_identifier = "ppp1_raw_image_512x512"
+
+    # Call the function with the modified parameters
+    run_all_encodings_on_all_modalities(
+        annotation_csv,
+        index_csv,
+        expression_directory,
+        encoded_directory,
+        output_directory,
+        patient_mapping,
+        all_modalities=False,
+        cohort_identifier=cohort_identifier,
+        module=module,
+        classifier='all',
+        n_jobs=8
+    )
