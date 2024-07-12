@@ -13,7 +13,8 @@ from sklearn.model_selection import GroupShuffleSplit
 import re
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, InputLayer
-from scikeras.wrappers import KerasClassifier
+from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -92,7 +93,17 @@ def create_model():
     model.compile(loss='binary_crossentropy', optimizer='adam')
     return model
 
+def is_a_path(string):
+    try:
+        p = Path(string)
+        return p.exists() or ("/" in string or "\\" in string)
+    except:
+        return False
+
 def homogenize_names(sample_name):
+    # if sample_name is a file_path, extract the base_file_name without any file extensions
+    if is_a_path(sample_name):
+        sample_name = str(Path(sample_name).name).split(".")[0]
     # if CP\d is encountered, replace it with CPP\d
     sample_name = re.sub(r'CP(\d+)', r'CPP\1', sample_name)
     # if string contains guot in any case, remove it

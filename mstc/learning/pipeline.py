@@ -35,7 +35,7 @@ def generate_cross_validation_pipeline(
         an evaluation report.
     """
     # ensure reproducibility in the classifier and log seed via parameter
-    parameter_grid['random_state'] = [random_state]
+    #parameter_grid['random_state'] = [random_state]
     # generate the pipeline
     return make_pipeline(
         VarianceThreshold(),
