@@ -1,18 +1,24 @@
+from typing import Any, Optional
+
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torchvision import models
 from torchmetrics import F1Score, Accuracy, Recall, Precision, AUROC
 
 HUB_MODELS = {
-    #'mobilenet_v2': ("pytorch/vision:v0.10.0", "mobilenet_v2"),
+
+# 'mobilenet_v2': ("pytorch/vision:v0.10.0", "mobilenet_v2", ),
     #'resnet18': ("pytorch/vision:v0.10.0", "resnet18"),
-    'resnet101': ("pytorch/vision:v0.10.0", "resnet101"),
-    #'resnet152': ("pytorch/vision:v0.10.0", "resnet152")
+    # 'resnet101': ("pytorch/vision:v0.10.0", "resnet101"),
+    # 'resnet152': ("pytorch/vision:v0.10.0", "resnet152")
+    'inception_v3': ("pytorch/vision:v0.10.0", "inception_v3"),
+    # TODO add convnext
 
 }
 class HubModel(pl.LightningModule):
-    def __init__(self, repo, hub_model_name, learning_rate=1e-3, freeze_base_model=True):
+    def __init__(self, repo, hub_model_name, learning_rate=1e-3, num_classes=2, freeze_base_model=True):
         super().__init__()
         self.save_hyperparameters()
 
@@ -40,13 +46,14 @@ class HubModel(pl.LightningModule):
             nn.Linear(512, 128),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(128, 1)
+            nn.Linear(128, num_classes),
         )
-        self.criterion = nn.BCEWithLogitsLoss()
-        self.accuracy = Accuracy(task='binary')
-        self.f1 = F1Score(task='binary')
-        self.recall = Recall(task='binary')
-        self.auroc = AUROC(task='binary')
+        self.criterion = nn.CrossEntropyLoss()
+
+        self.accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+        self.f1 = F1Score(task='multiclass', num_classes=num_classes)
+        self.recall = Recall(task='multiclass', num_classes=num_classes)
+        self.auroc = AUROC(task='multiclass', num_classes=num_classes)
 
 
     def forward(self, x):
@@ -55,18 +62,16 @@ class HubModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        y = y.float()
-        logits = self(x).squeeze()
+        logits = self(x)
         loss = self.criterion(logits, y)
         self.log('train_loss', loss)
         return loss
 
     def test_step(self, batch, batch_idx):
         x, y = batch
-        y = y.float().squeeze()
-        logits = self(x).squeeze()
+        logits = self(x)
         loss = self.criterion(logits, y)
-        preds = torch.sigmoid(logits)
+        preds = torch.softmax(logits, dim=1)
         f1 = self.f1(preds, y)
         acc = self.accuracy(preds, y)
         recall = self.recall(preds, y)

@@ -1,8 +1,11 @@
 """Components for encoding."""
 import logging
 import xarray as xr
-import tensorflow as tf
-import tensorflow_hub as hub
+try:
+    import tensorflow as tf
+    import tensorflow_hub as hub
+except ImportError:
+    pass
 from .core import Component
 
 

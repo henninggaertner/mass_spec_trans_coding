@@ -5,4 +5,7 @@ from .core import Component  # noqa: F401
 from .encoder import Flatten, HubEncoder  # noqa: F401
 from .io import PNGReader  # noqa: F401
 from .operation import Broadcast, Compose, Map, Reduce, ZipMap, BroadcastMap  # noqa
-from .model import HubModel  # noqa: F401
+try:
+    from .model import HubModel  # noqa: F401
+except ImportError:
+    pass

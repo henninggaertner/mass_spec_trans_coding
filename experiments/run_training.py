@@ -6,7 +6,7 @@ from functools import partial
 import torch.cuda
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import KFold
+from sklearn.model_selection import GroupKFold
 import numpy as np
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader, HubModel
@@ -71,7 +71,7 @@ PATTERN = re.compile(
 )
 
 
-def run_all_encodings_on_all_modalities(input_directory, output_directory, batch_size=4, index_csv=None, annotation_csv=None, patient_mapping=None, n_jobs=8, freeze_base_model=False):
+def run_all_encodings_on_all_modalities(input_directory, output_directory, batch_size=4, index_csv=None, annotation_csv=None, patient_mapping=None, n_jobs=8, freeze_base_model=False, n_splits=5):
     labels = pd.read_csv(annotation_csv)
     index_csv = pd.read_csv(index_csv)
     patient_mapping = pd.read_excel(patient_mapping, engine='openpyxl', skiprows=1, index_col="Run")
@@ -184,35 +184,70 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                 pppb_to_patient = {pppb: patient_mapping.loc[pppb]['ID'] for pppb in patient_mapping.index}
                 train_index, test_index = train_test_split_grouped(modality_array.indexes['sample'], pppb_to_patient, test_size=0.3)
                 # min max scaling
-                modality_array = (modality_array - modality_array.min()) / (modality_array.max() - modality_array.min())
+                # modality_array = (modality_array - modality_array.min()) / (modality_array.max() - modality_array.min())
                 logging.info(f'Freeze base model: {freeze_base_model}')
                 X_train, X_test = modality_array.sel(sample=train_index), modality_array.sel(sample=test_index)
                 y_train, y_test = labels.set_index('Raw_ID').loc[train_index]['Tissue'].values, labels.set_index('Raw_ID').loc[test_index]['Tissue'].values
+
+                # Get patient IDs for grouping
+                train_patient_ids = [pppb_to_patient[sample] for sample in train_index]
                 # TRAINING
                 #encoded_image_size = modality_array.attrs['encoded_image_size']
-                dataloader_args = {'batch_size': 4, 'num_workers': 16}
-                trainer_args = {'max_epochs': 1, 'accelerator': 'gpu', 'log_every_n_steps': 1}
+                dataloader_args = {'batch_size': 16, 'num_workers': 16}
+                trainer_args = {'max_epochs': 3, 'accelerator': 'gpu'}
                 X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32).permute(0, 3, 1, 2)
                 label_encoder = LabelEncoder()
                 y_train_encoded = label_encoder.fit_transform(y_train)
                 y_train_tensor = torch.tensor(y_train_encoded, dtype=torch.long)
 
-                train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-                train_loader = DataLoader(train_dataset, shuffle=True, **dataloader_args)
-                model = HubModel(repo=source,hub_model_name=model_name, freeze_base_model=freeze_base_model)
+                repeated_group_kfold = GroupKFold(n_splits=n_splits)
+                fold_results = []
+                for fold, (train_idx, val_idx) in enumerate(
+                        repeated_group_kfold.split(X_train_tensor, y_train_tensor, groups=train_patient_ids)):
+                    print(f"Fold {fold + 1}/{n_splits}")
 
-                trainer = pl.Trainer(**trainer_args)
+                    X_train_fold = X_train_tensor[train_idx]
+                    y_train_fold = y_train_tensor[train_idx]
+                    X_val_fold = X_train_tensor[val_idx]
+                    y_val_fold = y_train_tensor[val_idx]
 
-                trainer.fit(model, train_loader)
-                # TESTING
+                    train_dataset = TensorDataset(X_train_fold, y_train_fold)
+                    val_dataset = TensorDataset(X_val_fold, y_val_fold)
+
+                    train_loader = DataLoader(train_dataset, shuffle=True, **dataloader_args)
+                    val_loader = DataLoader(val_dataset, shuffle=False, **dataloader_args)
+
+                    model = HubModel(repo=source, hub_model_name=model_name, freeze_base_model=freeze_base_model)
+                    trainer = pl.Trainer(**trainer_args)
+
+                    trainer.fit(model, train_loader)
+
+                    # Evaluate the model on the validation set
+                    val_results = trainer.test(model, val_loader)
+                    fold_results.append(val_results[0])  # Assuming test() returns a list with one dict
+
+                    # Calculate average performance across folds
+                avg_performance = {metric: np.mean([result[metric] for result in fold_results]) for metric in
+                                   fold_results[0].keys()}
+                print(f"Average performance across folds: {avg_performance}")
+                # TESTING (remains the same)
                 X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32).permute(0, 3, 1, 2)
                 y_test_encoded = label_encoder.transform(y_test)
                 y_test_tensor = torch.tensor(y_test_encoded, dtype=torch.long)
 
                 test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
                 test_loader = DataLoader(test_dataset, shuffle=False, **dataloader_args)
-                trainer.test(model, test_loader)
 
+                # Train a final model on all training data
+                full_train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+                full_train_loader = DataLoader(full_train_dataset, shuffle=True, **dataloader_args)
+                final_model = HubModel(repo=source, hub_model_name=model_name, freeze_base_model=freeze_base_model)
+                final_trainer = pl.Trainer(**trainer_args)
+                final_trainer.fit(final_model, full_train_loader)
+
+                # Test the final model
+                test_results = final_trainer.test(final_model, test_loader)
+                print(f"Final test results: {test_results}")
 
 
 
@@ -292,6 +327,7 @@ if __name__ == "__main__":
         index_csv=index_csv,
         annotation_csv=annotation_csv,
         patient_mapping=patient_mapping,
-        freeze_base_model=True
+        freeze_base_model=True,
+        n_splits=5
     )
 
