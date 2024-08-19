@@ -223,7 +223,7 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
 
 
 if __name__ == "__main__":
-    data_dir = "/home/henning/mass_spec_trans_coding/data/" # TODO magic path
+    data_dir = ""
     annotation_csv = data_dir+"annotation.csv"
     index_csv = data_dir+"index.csv"
     input_directory = data_dir+"ppp1_raw_image_512x512"
