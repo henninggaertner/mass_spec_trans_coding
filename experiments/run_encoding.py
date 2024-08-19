@@ -1,5 +1,4 @@
-"""Encoding of directory of raw ms images.
-Writing an xr.DataArray for each modality encoded with each hub module."""
+"""Encodes raw MS images with tensorflow and directly trains classifiers on the encoded features."""
 import traceback
 from functools import partial
 
@@ -8,51 +7,67 @@ from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader
 from run_learning_ppp1 import *
+import traceback
+import os
+from functools import partial
 
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import GroupKFold
+import numpy as np
+import pytorch_lightning as pl
+from mstc.processing.model import MLPClassifier
+
+from mstc.processing import Compose, HubEncoder, Map, PNGReader
+from mstc.processing.model import HubModel
+from run_learning_ppp1 import homogenize_names, train_test_split_grouped
 assert sys.version_info >= (3, 6)
+os.environ["KMP_WARNINGS"] = "FALSE"
 
 HUB_MODULES = pd.Series(OrderedDict([
     # 1-10
     ('inception_v3_imagenet', 'https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1'),  # noqa
-    # # ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2')  # noqa
-    # ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
-    # ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
-    # ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
-    # ('resnet_v2_152', 'https://tfhub.dev/google/imagenet/resnet_v2_152/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_140_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2'),  # noqa
-    # ('pnasnet_large', 'https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2'),  # noqa
-    # ('mobilenet_v2_035_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/2'),  # noqa
-    # ('mobilenet_v1_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/feature_vector/1'),  # noqa
-    # # 11-20
-    # ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
-    # # # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
-    # ('resnet_v2_101', 'https://tfhub.dev/google/imagenet/resnet_v2_101/feature_vector/1'),  # noqa
-    # # # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
-    # ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
-    # ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_035_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2'),  # noqa
-    # ('mobilenet_v2_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_224/feature_vector/2'),  # noqa
-    # # 21-30
-    # ('mobilenet_v2_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_128/feature_vector/2'),  # noqa
-    # ('nasnet_mobile', 'https://tfhub.dev/google/imagenet/nasnet_mobile/feature_vector/1'),  # noqa
-    # ('inception_v3_inaturalist', 'https://tfhub.dev/google/inaturalist/inception_v3/feature_vector/1'),  # noqa
-    # ('mobilenet_v1_025_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_128/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_128/feature_vector/2'),  # noqa
-    # ('inception_v2', 'https://tfhub.dev/google/imagenet/inception_v2/feature_vector/1'),  # noqa
-    # ('mobilenet_v1_025_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_224/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_075_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_96/feature_vector/2'),  # noqa
-    # ('mobilenet_v1_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_128/feature_vector/1'),  # noqa
-    # ('mobilenet_v1_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_128/feature_vector/1'),  # noqa
-    # # other
-    # ('amoebanet_a_n18_f448', 'https://tfhub.dev/google/imagenet/amoebanet_a_n18_f448/feature_vector/1'),  # noqa
+    ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2'),  # noqa
+    ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
+    ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
+    ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
+    ('resnet_v2_152', 'https://tfhub.dev/google/imagenet/resnet_v2_152/feature_vector/1'),  # noqa
+    ('mobilenet_v2_140_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2'),  # noqa
+    ('pnasnet_large', 'https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2'),  # noqa
+    ('mobilenet_v2_035_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/2'),  # noqa
+    ('mobilenet_v1_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/feature_vector/1'),  # noqa
+    # 11-20
+    ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
+    ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
+    # # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
+    ('resnet_v2_101', 'https://tfhub.dev/google/imagenet/resnet_v2_101/feature_vector/1'),  # noqa
+    # # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
+    ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
+    ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
+    ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
+    ('mobilenet_v2_035_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2'),  # noqa
+    ('mobilenet_v2_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_224/feature_vector/2'),  # noqa
+    # 21-30
+    ('mobilenet_v2_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_128/feature_vector/2'),  # noqa
+    ('nasnet_mobile', 'https://tfhub.dev/google/imagenet/nasnet_mobile/feature_vector/1'),  # noqa
+    ('inception_v3_inaturalist', 'https://tfhub.dev/google/inaturalist/inception_v3/feature_vector/1'),  # noqa
+    ('mobilenet_v1_025_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_128/feature_vector/1'),  # noqa
+    ('mobilenet_v2_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_128/feature_vector/2'),  # noqa
+    ('inception_v2', 'https://tfhub.dev/google/imagenet/inception_v2/feature_vector/1'),  # noqa
+    ('mobilenet_v1_025_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_224/feature_vector/1'),  # noqa
+    ('mobilenet_v2_075_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_96/feature_vector/2'),  # noqa
+    ('mobilenet_v1_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_128/feature_vector/1'),  # noqa
+    ('mobilenet_v1_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_128/feature_vector/1'),  # noqa
+    # other
+    ('amoebanet_a_n18_f448', 'https://tfhub.dev/google/imagenet/amoebanet_a_n18_f448/feature_vector/1'),  # noqa
 ]))
 
 
 #tf.logging.set_verbosity('CRITICAL')
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+os.environ["KMP_WARNINGS"] = "FALSE"
+
+
 
 PATTERN = re.compile(
     r'(?P<sample_name>.+?)(\.mzXML\.gz\.image\.0\.)'
@@ -60,6 +75,29 @@ PATTERN = re.compile(
     r'\.png'
 )
 
+def pytorch_mlp(X_train, y_train, X_test, y_test, train_patient_ids, nsplits=5):
+    from torch.utils.data import DataLoader, TensorDataset
+    import torch
+    import torch.nn as nn
+    X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
+    y_train_tensor = torch.tensor(LabelEncoder().fit_transform(y_train), dtype=torch.long)
+    repeated_group_kfold = GroupKFold(n_splits=nsplits)
+    fold_results = []
+    for fold, (train_index, val_index) in enumerate(repeated_group_kfold.split(X_train, y_train, groups=train_patient_ids)):
+        print(f"fold: {fold}")
+        X_train_fold, X_val_fold = X_train_tensor[train_index], X_train_tensor[val_index]
+        y_train_fold, y_val_fold = y_train_tensor[train_index], y_train_tensor[val_index]
+        train_dataset = TensorDataset(X_train_fold, y_train_fold)
+        val_dataset = TensorDataset(X_val_fold, y_val_fold)
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
+        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
+
+        model = MLPClassifier(input_size=X_train.shape[1], num_classes=len(np.unique(y_train)))
+        trainer = pl.Trainer(max_epochs=10, gpus=1)
+        trainer.fit(model, train_loader, val_loader)
+        fold_results.append(trainer.test(model, val_loader))
+
+    return fold_results
 
 
 
@@ -174,7 +212,7 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                 debug_array = modality_array[0]
                 train_index, test_index = train_test_split_grouped(modality_array.indexes['sample'], pppb_to_patient, test_size=0.3)
                 # SPLITTING
-                X_train, X_test = modality_array.sel(sample=train_index)[0], modality_array.sel(sample=test_index)[0]
+                X_train, X_test = modality_array.sel(sample=train_index), modality_array.sel(sample=test_index)
                 y_train, y_test = labels.set_index('Raw_ID').loc[train_index]['Tissue'].values, labels.set_index('Raw_ID').loc[test_index]['Tissue'].values
                 # TRAINING
                 encoded_image_size = modality_array.attrs['encoded_image_size']
@@ -224,11 +262,6 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                     with open(json_path, 'w') as open_file:
                         json.dump(results, open_file)
                     logger.info(f'{name}: {validation_scores}')
-
-                # filename = os.path.join(output_directory, name + '.nc')
-                #
-                # modality_array.to_netcdf(filename)
-                # logger.info(f'{name}.nc was written')
         except KeyboardInterrupt:
             raise KeyboardInterrupt
         except Exception:
@@ -239,11 +272,11 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
 
 
 if __name__ == "__main__":
-    data_dir = "/home/henning/mass_spec_trans_coding/data/" # TODO magic path
+    data_dir = ""
     annotation_csv = data_dir+"annotation.csv"
     index_csv = data_dir+"index.csv"
     input_directory = data_dir+"ppp1_raw_image_512x512"
-    output_directory = data_dir+"output_fused_encoder_classifier"
+    output_directory = data_dir+"output"
     patient_mapping = data_dir+"inline-supplementary-material-5.xlsx"
 
     # Call the function with the modified parameters
