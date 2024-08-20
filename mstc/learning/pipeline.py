@@ -38,7 +38,7 @@ def generate_cross_validation_pipeline(
     #parameter_grid['random_state'] = [random_state]
     # generate the pipeline
     return make_pipeline(
-        VarianceThreshold(),
+        #VarianceThreshold(),
         MinMaxScaler(),
         GridSearchCV(
             classifier,

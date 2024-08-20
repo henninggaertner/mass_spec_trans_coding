@@ -10,11 +10,18 @@ from collections import OrderedDict
 from functools import partial
 import pandas as pd
 from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import GroupKFold
 import re
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, InputLayer
 from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
 from pathlib import Path
+from mstc.processing.model import MLPClassifier
+import pytorch_lightning as pl
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import LabelEncoder
 
 import pandas as pd
 import numpy as np
@@ -42,40 +49,40 @@ logger.setLevel(logging.INFO)
 
 HUB_MODULES = pd.Series(OrderedDict([
     # 1-10
-    ('inception_v3_imagenet', 'https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1'),  # noqa
-    # # ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2')  # noqa
-    ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
-    ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
-    ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
-    ('resnet_v2_152', 'https://tfhub.dev/google/imagenet/resnet_v2_152/feature_vector/1'),  # noqa
-    ('mobilenet_v2_140_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2'),  # noqa
-    ('pnasnet_large', 'https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2'),  # noqa
-    ('mobilenet_v2_035_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/2'),  # noqa
-    ('mobilenet_v1_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/feature_vector/1'),  # noqa
-    # 11-20
-    ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
-    ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
-    # # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
+    # ('inception_v3_imagenet', 'https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1'),  # noqa
+    # # # ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2')  # noqa
+    # ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
+    # ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
+    # ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
+    # ('resnet_v2_152', 'https://tfhub.dev/google/imagenet/resnet_v2_152/feature_vector/1'),  # noqa
+    # ('mobilenet_v2_140_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2'),  # noqa
+    # ('pnasnet_large', 'https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2'),  # noqa
+    # ('mobilenet_v2_035_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/2'),  # noqa
+    # ('mobilenet_v1_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/feature_vector/1'),  # noqa
+    # # 11-20
+    # ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
+    # ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
+    # # # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
     ('resnet_v2_101', 'https://tfhub.dev/google/imagenet/resnet_v2_101/feature_vector/1'),  # noqa
-    # # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
-    ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
-    ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
-    ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
-    ('mobilenet_v2_035_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2'),  # noqa
-    ('mobilenet_v2_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_224/feature_vector/2'),  # noqa
-    # 21-30
-    ('mobilenet_v2_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_128/feature_vector/2'),  # noqa
-    ('nasnet_mobile', 'https://tfhub.dev/google/imagenet/nasnet_mobile/feature_vector/1'),  # noqa
-    ('inception_v3_inaturalist', 'https://tfhub.dev/google/inaturalist/inception_v3/feature_vector/1'),  # noqa
-    ('mobilenet_v1_025_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_128/feature_vector/1'),  # noqa
-    ('mobilenet_v2_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_128/feature_vector/2'),  # noqa
-    ('inception_v2', 'https://tfhub.dev/google/imagenet/inception_v2/feature_vector/1'),  # noqa
-    ('mobilenet_v1_025_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_224/feature_vector/1'),  # noqa
-    ('mobilenet_v2_075_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_96/feature_vector/2'),  # noqa
-    ('mobilenet_v1_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_128/feature_vector/1'),  # noqa
-    ('mobilenet_v1_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_128/feature_vector/1'),  # noqa
-    # other
-    ('amoebanet_a_n18_f448', 'https://tfhub.dev/google/imagenet/amoebanet_a_n18_f448/feature_vector/1'),  # noqa
+    # # # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
+    # ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
+    # ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
+    # ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
+    # ('mobilenet_v2_035_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2'),  # noqa
+    # ('mobilenet_v2_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_224/feature_vector/2'),  # noqa
+    # # 21-30
+    # ('mobilenet_v2_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_128/feature_vector/2'),  # noqa
+    # ('nasnet_mobile', 'https://tfhub.dev/google/imagenet/nasnet_mobile/feature_vector/1'),  # noqa
+    # ('inception_v3_inaturalist', 'https://tfhub.dev/google/inaturalist/inception_v3/feature_vector/1'),  # noqa
+    # ('mobilenet_v1_025_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_128/feature_vector/1'),  # noqa
+    # ('mobilenet_v2_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_128/feature_vector/2'),  # noqa
+    # ('inception_v2', 'https://tfhub.dev/google/imagenet/inception_v2/feature_vector/1'),  # noqa
+    # ('mobilenet_v1_025_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_224/feature_vector/1'),  # noqa
+    # ('mobilenet_v2_075_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_96/feature_vector/2'),  # noqa
+    # ('mobilenet_v1_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_128/feature_vector/1'),  # noqa
+    # ('mobilenet_v1_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_128/feature_vector/1'),  # noqa
+    # # other
+    # ('amoebanet_a_n18_f448', 'https://tfhub.dev/google/imagenet/amoebanet_a_n18_f448/feature_vector/1'),  # noqa
 ]))
 
 PATTERN = re.compile(
@@ -84,15 +91,41 @@ PATTERN = re.compile(
     r'\.png'
 )
 
+def pytorch_mlp(X_train, y_train, X_test, y_test, train_patient_ids, nsplits=5):
+    X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
+    y_train_tensor = torch.tensor(LabelEncoder().fit_transform(y_train), dtype=torch.long)
+    repeated_group_kfold = GroupKFold(n_splits=nsplits)
+    fold_results = []
+    for fold, (train_index, val_index) in enumerate(repeated_group_kfold.split(X_train, y_train, groups=train_patient_ids)):
+        print(f"fold: {fold}")
+        X_train_fold, X_val_fold = X_train_tensor[train_index], X_train_tensor[val_index]
+        y_train_fold, y_val_fold = y_train_tensor[train_index], y_train_tensor[val_index]
+        train_dataset = TensorDataset(X_train_fold, y_train_fold)
+        val_dataset = TensorDataset(X_val_fold, y_val_fold)
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+
+        model = MLPClassifier(input_size=X_train.shape[1], num_classes=len(np.unique(y_train)))
+        trainer = pl.Trainer(max_epochs=10, gpus=1)
+        trainer.fit(model, train_loader, val_loader)
+        fold_results.append(trainer.test(model, val_loader))
+
+    return fold_results
 def create_model():
     model = Sequential()
-    model.add(InputLayer(input_shape=(936,)))
+    model.add(InputLayer(input_shape=(2048,)))
     model.add(Dense(512, activation='relu'))
     model.add(Dense(64, activation='relu'))
     model.add(Dense(1, activation='sigmoid'))
     model.compile(loss='binary_crossentropy', optimizer='adam')
     return model
 
+def create_model_linear():
+    model = Sequential()
+    model.add(InputLayer(input_shape=(2048,)))
+    model.add(Dense(1, activation='sigmoid'))
+    model.compile(loss='binary_crossentropy', optimizer='adam')
+    return model
 def is_a_path(string):
     try:
         p = Path(string)
@@ -355,24 +388,28 @@ def run_all_encodings_on_all_modalities(
     )
 
     classifiers = {
-        'LogisticRegression': classifier_pipeline(
-            LogisticRegression(solver='lbfgs', max_iter=300),
-            subdict(PARAMETER_GRID, ['C']),
-        ),
-        'SVC': classifier_pipeline(
-            SVC(gamma='auto', probability=True),
-            subdict(PARAMETER_GRID, ['C', 'kernel']),
-        ),
-        'RandomForest': classifier_pipeline(
-            RandomForestClassifier(),
-            subdict(PARAMETER_GRID, ['n_estimators']),
-        ),
-        'XGBoost': classifier_pipeline(
-            XGBClassifier(),
-            subdict(PARAMETER_GRID, ['n_estimators']),
-        ),
+        # 'LogisticRegression': classifier_pipeline(
+        #     LogisticRegression(solver='lbfgs', max_iter=300),
+        #     subdict(PARAMETER_GRID, ['C']),
+        # ),
+        # 'SVC': classifier_pipeline(
+        #     SVC(gamma='auto', probability=True),
+        #     subdict(PARAMETER_GRID, ['C', 'kernel']),
+        # ),
+        # 'RandomForest': classifier_pipeline(
+        #     RandomForestClassifier(),
+        #     subdict(PARAMETER_GRID, ['n_estimators']),
+        # ),
+        # 'XGBoost': classifier_pipeline(
+        #     XGBClassifier(),
+        #     subdict(PARAMETER_GRID, ['n_estimators']),
+        # ),
         '3LP': classifier_pipeline(
-            KerasClassifier(build_fn=create_model, epochs=100, batch_size=10, verbose=0),
+            KerasClassifier(build_fn=create_model, epochs=10, batch_size=16, verbose=0),
+            {},
+        ),
+        '1LP': classifier_pipeline(
+            KerasClassifier(build_fn=create_model_linear, epochs=10, batch_size=16, verbose=0),
             {},
         )
 
@@ -463,12 +500,13 @@ def run_all_encodings_on_all_modalities(
         #    stratify=y
         #)
         # NEW SPLIT
-        train_index, test_index = train_test_split_grouped(index, pppb_to_patient, test_size=0.3, random_state=RANDOM_STATE)
-        X_train = encoded_module.loc[train_index].values
-        X_test = encoded_module.loc[test_index].values
-        y_train = y.loc[train_index]
-        y_test = y.loc[test_index]
+        train_index, test_index = train_test_split_grouped(encoded_module.indexes['sample'], pppb_to_patient, test_size=0.3)
+        # SPLITTING
+        X_train, X_test = encoded_module.sel(sample=train_index), encoded_module.sel(sample=test_index)
+        y_train, y_test = y.loc[train_index], y.loc[test_index]
 
+        # train_patient_ids = [pppb_to_patient[pppb] for pppb in train_index]
+        # pytorch_mlp(X_train, y_train, X_test, y_test, train_patient_ids)
 
         encoded_image_size = sizedict(
             encoded_module.attrs['encoded_image_size']
@@ -492,8 +530,8 @@ def run_all_encodings_on_all_modalities(
             pipeline.fit(X_train, y_train)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                cv_df = pd.DataFrame(pipeline.steps[2][1].cv_results_)
-            cv_index = int(pipeline.steps[2][1].best_index_)
+                cv_df = pd.DataFrame(pipeline.steps[1][1].cv_results_)
+            cv_index = int(pipeline.steps[1][1].best_index_)
             training_scores = cv_df.loc[cv_index, [
                 'mean_test_AUC', 'mean_test_Accuracy', 'mean_test_F1',
                 'mean_train_AUC', 'mean_train_Accuracy', 'mean_train_F1'
@@ -507,8 +545,8 @@ def run_all_encodings_on_all_modalities(
                 'encoded_image_size':
                     encoded_image_size,
                 'encoded_features_size': encoded_features_size,
-                'non_varying_features':
-                    int(sum(pipeline.steps[0][1]._get_support_mask())),
+                # 'non_varying_features':
+                #     int(sum(pipeline.steps[0][1]._get_support_mask())),
                 'cohort_identifier': cohort_identifier,
                 'module': module,
                 'modality': modality,
@@ -601,7 +639,7 @@ def run_all_encodings_on_all_modalities(
 
 
 if __name__ == "__main__":
-    data_dir = "/home/henning/mass_spec_trans_coding/data/" # TODO magic path
+    data_dir = ""
     annotation_csv = data_dir+"annotation.csv"
     index_csv = data_dir+"index.csv"
     expression_directory = data_dir+"expression"
