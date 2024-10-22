@@ -8,7 +8,7 @@ from sklearn.pipeline import make_pipeline
 def generate_cross_validation_pipeline(
     classifier, parameter_grid,
     folds=5, repeats=1, random_state=12345,
-    number_of_jobs=1, scoring=None, refit=True
+    number_of_jobs=1, scoring=None, refit=True, variance_threshold=False
 ):
     """
     Evaluate a classifier trained with cross validation.
@@ -37,20 +37,25 @@ def generate_cross_validation_pipeline(
     # ensure reproducibility in the classifier and log seed via parameter
     #parameter_grid['random_state'] = [random_state]
     # generate the pipeline
+    steps = []
+    if variance_threshold:
+        steps.append(VarianceThreshold())
+    steps.append(MinMaxScaler())
+    steps.append(GridSearchCV(
+        classifier,
+        param_grid=parameter_grid,
+        cv=RepeatedStratifiedKFold(
+            n_splits=folds,
+            n_repeats=repeats,
+            random_state=random_state
+        ),
+        refit=refit,
+        n_jobs=number_of_jobs,
+        scoring=scoring,
+        return_train_score=True
+    ))
+
     return make_pipeline(
-        #VarianceThreshold(),
-        MinMaxScaler(),
-        GridSearchCV(
-            classifier,
-            param_grid=parameter_grid,
-            cv=RepeatedStratifiedKFold(
-                n_splits=folds,
-                n_repeats=repeats,
-                random_state=random_state
-            ),
-            refit=refit,
-            n_jobs=number_of_jobs,
-            scoring=scoring,
-            return_train_score=True
-        )
+        *steps
+
     )

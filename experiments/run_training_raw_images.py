@@ -1,8 +1,9 @@
 """
-Complete training pipeline, taking in the raw MS images and using pytorch lightning to train a model with a classifier on them.
+Complete training pipeline, taking in the raw MS images and using pytorch lightning to train a model with a classifier on them. Uses a k-fold cross-validation approach to evaluate the model.
 """
 import traceback
 from functools import partial
+import argparse
 
 import torch.cuda
 from torch.utils.data import DataLoader, TensorDataset
@@ -12,7 +13,7 @@ import numpy as np
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader, HubModel, ValidationCallback
 from mstc.processing.model import HUB_MODELS
-from run_learning_ppp1 import homogenize_names, train_test_split_grouped
+from run_classification import homogenize_names, train_test_split_grouped
 import pandas as pd
 import pytorch_lightning as pl
 import os
@@ -41,7 +42,9 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
     labels = pd.merge(labels, index_csv, on='PPPB_ID', how='inner')
 
     output_directory = os.path.abspath(os.path.expanduser(output_directory))
-    assert os.path.exists(output_directory)
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+        logger.info(f'Created output directory {output_directory}')
     data_dir = os.path.abspath(os.path.expanduser(input_directory))
 
     sample_set = set()
@@ -112,7 +115,7 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                 pppb_to_patient = {pppb: patient_mapping.loc[pppb]['ID'] for pppb in patient_mapping.index}
                 train_index, test_index = train_test_split_grouped(modality_array.indexes['sample'], pppb_to_patient, test_size=0.3)
                 # min max scaling
-                # modality_array = (modality_array - modality_array.min()) / (modality_array.max() - modality_array.min())
+                modality_array = (modality_array - modality_array.min()) / (modality_array.max() - modality_array.min())
                 logging.info(f'Freeze base model: {freeze_base_model}')
                 X_train, X_test = modality_array.sel(sample=train_index), modality_array.sel(sample=test_index)
                 y_train, y_test = labels.set_index('Raw_ID').loc[train_index]['Tissue'].values, labels.set_index('Raw_ID').loc[test_index]['Tissue'].values
@@ -120,7 +123,7 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                 # Get patient IDs for grouping
                 train_patient_ids = [pppb_to_patient[sample] for sample in train_index]
                 # TRAINING
-                dataloader_args = {'batch_size': 16}
+                dataloader_args = {'batch_size': 2}
                 trainer_args = {'max_epochs': 5, 'accelerator': 'gpu'}
                 # trainer_args['callbacks'] = ValidationCallback()
                 trainer_args['val_check_interval'] = 1.0
@@ -223,22 +226,26 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
 
 
 if __name__ == "__main__":
-    data_dir = ""
-    annotation_csv = data_dir+"annotation.csv"
-    index_csv = data_dir+"index.csv"
-    input_directory = data_dir+"ppp1_raw_image_512x512"
-    output_directory = data_dir+"output/final"
-    patient_mapping = data_dir+"inline-supplementary-material-5.xlsx"
+    parser = argparse.ArgumentParser(description='Run deep learning model training on raw MS images')
+    parser.add_argument('--input-directory', type=str, required=True, help='Input directory with raw MS images to train on')
+    parser.add_argument('--output-directory', type=str, required=True, help='Output directory to save training results to')
+    parser.add_argument('--batch-size', type=int, default=4, help='Batch size for training images')
+    parser.add_argument('--index-csv', type=str, required=True, help='Index CSV file with PPPB_ID and sample name mapping')
+    parser.add_argument('--annotation-csv', type=str, required=True, help='Annotation csv file with tissue labels')
+    parser.add_argument('--patient-mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
+    parser.add_argument('--freeze-base-model', action='store_true', help='Whether to freeze the base model')
+    parser.add_argument('--n-splits', type=int, default=5, help='Number of splits for cross-validation')
+    args = parser.parse_args()
 
     # Call the function with the modified parameters
     run_all_encodings_on_all_modalities(
-        input_directory=input_directory,
-        output_directory=output_directory,
-        batch_size=4,
-        index_csv=index_csv,
-        annotation_csv=annotation_csv,
-        patient_mapping=patient_mapping,
-        freeze_base_model=True,
-        n_splits=5
+        input_directory=args.input_directory,
+        output_directory=args.output_directory,
+        batch_size=args.batch_size,
+        index_csv=args.index_csv,
+        annotation_csv=args.annotation_csv,
+        patient_mapping=args.patient_mapping,
+        freeze_base_model=False,
+        n_splits=args.n_splits
     )
 

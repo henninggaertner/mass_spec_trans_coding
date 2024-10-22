@@ -1,4 +1,4 @@
-"""Use encoded features for specific classification task."""
+"""Run classification on a cleanly split dataset of features encoded with tensorflow models. Classical ML classifiers are used, but option to use an MLP is available."""
 import glob
 import json
 import logging
@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import warnings
+import argparse
 from collections import OrderedDict
 from functools import partial
 import pandas as pd
@@ -49,40 +50,40 @@ logger.setLevel(logging.INFO)
 
 HUB_MODULES = pd.Series(OrderedDict([
     # 1-10
-    # ('inception_v3_imagenet', 'https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1'),  # noqa
-    # # # ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2')  # noqa
-    # ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
-    # ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
-    # ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
-    # ('resnet_v2_152', 'https://tfhub.dev/google/imagenet/resnet_v2_152/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_140_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2'),  # noqa
-    # ('pnasnet_large', 'https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2'),  # noqa
-    # ('mobilenet_v2_035_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/2'),  # noqa
-    # ('mobilenet_v1_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/feature_vector/1'),  # noqa
-    # # 11-20
-    # ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
-    # # # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
+    ('inception_v3_imagenet', 'https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1'),  # noqa
+    # ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2')  # noqa
+    ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
+    ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
+    ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
+    ('resnet_v2_152', 'https://tfhub.dev/google/imagenet/resnet_v2_152/feature_vector/1'),  # noqa
+    ('mobilenet_v2_140_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2'),  # noqa
+    ('pnasnet_large', 'https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2'),  # noqa
+    ('mobilenet_v2_035_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/2'),  # noqa
+    ('mobilenet_v1_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/feature_vector/1'),  # noqa
+    # 11-20
+    ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
+    ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
+    # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
     ('resnet_v2_101', 'https://tfhub.dev/google/imagenet/resnet_v2_101/feature_vector/1'),  # noqa
-    # # # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
-    # ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
-    # ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_035_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2'),  # noqa
-    # ('mobilenet_v2_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_224/feature_vector/2'),  # noqa
-    # # 21-30
-    # ('mobilenet_v2_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_128/feature_vector/2'),  # noqa
-    # ('nasnet_mobile', 'https://tfhub.dev/google/imagenet/nasnet_mobile/feature_vector/1'),  # noqa
-    # ('inception_v3_inaturalist', 'https://tfhub.dev/google/inaturalist/inception_v3/feature_vector/1'),  # noqa
-    # ('mobilenet_v1_025_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_128/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_128/feature_vector/2'),  # noqa
-    # ('inception_v2', 'https://tfhub.dev/google/imagenet/inception_v2/feature_vector/1'),  # noqa
-    # ('mobilenet_v1_025_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_224/feature_vector/1'),  # noqa
-    # ('mobilenet_v2_075_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_96/feature_vector/2'),  # noqa
-    # ('mobilenet_v1_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_128/feature_vector/1'),  # noqa
-    # ('mobilenet_v1_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_128/feature_vector/1'),  # noqa
-    # # other
-    # ('amoebanet_a_n18_f448', 'https://tfhub.dev/google/imagenet/amoebanet_a_n18_f448/feature_vector/1'),  # noqa
+    # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
+    ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
+    ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
+    ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
+    ('mobilenet_v2_035_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2'),  # noqa
+    ('mobilenet_v2_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_224/feature_vector/2'),  # noqa
+    # 21-30
+    ('mobilenet_v2_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_128/feature_vector/2'),  # noqa
+    ('nasnet_mobile', 'https://tfhub.dev/google/imagenet/nasnet_mobile/feature_vector/1'),  # noqa
+    ('inception_v3_inaturalist', 'https://tfhub.dev/google/inaturalist/inception_v3/feature_vector/1'),  # noqa
+    ('mobilenet_v1_025_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_128/feature_vector/1'),  # noqa
+    ('mobilenet_v2_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_128/feature_vector/2'),  # noqa
+    ('inception_v2', 'https://tfhub.dev/google/imagenet/inception_v2/feature_vector/1'),  # noqa
+    ('mobilenet_v1_025_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_224/feature_vector/1'),  # noqa
+    ('mobilenet_v2_075_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_96/feature_vector/2'),  # noqa
+    ('mobilenet_v1_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_128/feature_vector/1'),  # noqa
+    ('mobilenet_v1_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_128/feature_vector/1'),  # noqa
+    # other
+    ('amoebanet_a_n18_f448', 'https://tfhub.dev/google/imagenet/amoebanet_a_n18_f448/feature_vector/1'),  # noqa
 ]))
 
 PATTERN = re.compile(
@@ -294,6 +295,10 @@ def compute_scores(y, X, classifier):
         'Recall': recall,
         'Precision': precision,
         'Specificity': specificity,
+        'False Positive': fp,
+        'False Negative': fn,
+        'True Positive': tp,
+        'True Negative': tn,
     }
 
 
@@ -337,7 +342,9 @@ def run_all_encodings_on_all_modalities(
     module_selection = module
     classifier_selection = classifier
     output_directory = os.path.abspath(os.path.expanduser(output_directory))
-    assert os.path.exists(output_directory)
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+        logger.info(f'Created output directory {output_directory}')
     data_dir = os.path.abspath(os.path.expanduser(encoded_directory))
 
     # annotation
@@ -385,33 +392,34 @@ def run_all_encodings_on_all_modalities(
         number_of_jobs=n_jobs,
         scoring=SCORING,
         refit='AUC',
+        variance_threshold=True
     )
 
     classifiers = {
-        # 'LogisticRegression': classifier_pipeline(
-        #     LogisticRegression(solver='lbfgs', max_iter=300),
-        #     subdict(PARAMETER_GRID, ['C']),
-        # ),
-        # 'SVC': classifier_pipeline(
-        #     SVC(gamma='auto', probability=True),
-        #     subdict(PARAMETER_GRID, ['C', 'kernel']),
-        # ),
-        # 'RandomForest': classifier_pipeline(
-        #     RandomForestClassifier(),
-        #     subdict(PARAMETER_GRID, ['n_estimators']),
-        # ),
-        # 'XGBoost': classifier_pipeline(
-        #     XGBClassifier(),
-        #     subdict(PARAMETER_GRID, ['n_estimators']),
-        # ),
-        '3LP': classifier_pipeline(
-            KerasClassifier(build_fn=create_model, epochs=10, batch_size=16, verbose=0),
-            {},
+        'LogisticRegression': classifier_pipeline(
+            LogisticRegression(solver='lbfgs', max_iter=300),
+            subdict(PARAMETER_GRID, ['C']),
         ),
-        '1LP': classifier_pipeline(
-            KerasClassifier(build_fn=create_model_linear, epochs=10, batch_size=16, verbose=0),
-            {},
-        )
+        'SVC': classifier_pipeline(
+            SVC(gamma='auto', probability=True),
+            subdict(PARAMETER_GRID, ['C', 'kernel']),
+        ),
+        'RandomForest': classifier_pipeline(
+            RandomForestClassifier(),
+            subdict(PARAMETER_GRID, ['n_estimators']),
+        ),
+        'XGBoost': classifier_pipeline(
+            XGBClassifier(),
+            subdict(PARAMETER_GRID, ['n_estimators']),
+        ),
+        # '3LP': classifier_pipeline(
+        #     KerasClassifier(build_fn=create_model, epochs=10, batch_size=16, verbose=0),
+        #     {},
+        # ),
+        # '1LP': classifier_pipeline(
+        #     KerasClassifier(build_fn=create_model_linear, epochs=10, batch_size=16, verbose=0),
+        #     {},
+        # )
 
     }
     if classifier_selection != 'all':
@@ -463,6 +471,11 @@ def run_all_encodings_on_all_modalities(
                 f'{module} has only {n_modalities}/101 modalities available'
             )
             module += '_incomplete'
+        if n_modalities == 0:
+            logger.critical(
+                f'No classification of {module}; no modalities found'
+            )
+            continue
         encoded_features_size = encoded_modalities[0][1].sizes['hub_feature']
 
         encoded_modalities.sort(key=lambda key_value: key_value[0])
@@ -530,13 +543,13 @@ def run_all_encodings_on_all_modalities(
             pipeline.fit(X_train, y_train)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                cv_df = pd.DataFrame(pipeline.steps[1][1].cv_results_)
-            cv_index = int(pipeline.steps[1][1].best_index_)
+                cv_df = pd.DataFrame(pipeline.steps[2][1].cv_results_)
+            cv_index = int(pipeline.steps[2][1].best_index_)
             training_scores = cv_df.loc[cv_index, [
                 'mean_test_AUC', 'mean_test_Accuracy', 'mean_test_F1',
                 'mean_train_AUC', 'mean_train_Accuracy', 'mean_train_F1'
             ]].to_dict()
-            # run valitation
+            # run validation
             validation_scores = compute_scores(y_test, X_test, pipeline)
             # collect results
             results = {
@@ -545,8 +558,8 @@ def run_all_encodings_on_all_modalities(
                 'encoded_image_size':
                     encoded_image_size,
                 'encoded_features_size': encoded_features_size,
-                # 'non_varying_features':
-                #     int(sum(pipeline.steps[0][1]._get_support_mask())),
+                'non_varying_features':
+                    int(sum(pipeline.steps[0][1]._get_support_mask())),
                 'cohort_identifier': cohort_identifier,
                 'module': module,
                 'modality': modality,
@@ -558,8 +571,11 @@ def run_all_encodings_on_all_modalities(
             # write to disk
             cv_df.to_csv(cv_path)
             with open(json_path, 'w') as open_file:
-                json.dump(results, open_file)
+                json.dump(results, open_file, default=str)
             logger.info(f'{name}: {validation_scores}')
+
+    # check if the expression directory is empty, as the data is not publicly provided, a skip is necessary
+    make_expression_iterator = make_expression_iterator and any(os.scandir(expression_directory))
 
     if make_expression_iterator:
         expression_dict = read_expression(
@@ -639,29 +655,31 @@ def run_all_encodings_on_all_modalities(
 
 
 if __name__ == "__main__":
-    data_dir = ""
-    annotation_csv = data_dir+"annotation.csv"
-    index_csv = data_dir+"index.csv"
-    expression_directory = data_dir+"expression"
-    encoded_directory = data_dir+"resnet_v2_101"
-    output_directory = data_dir+"output"
-    patient_mapping = data_dir+"inline-supplementary-material-5.xlsx"
-
-    # Set the module to 'resnet_v2_50' and cohort_identifier to the directory name of the 512x12 encoded data
-    module = 'resnet_v2_101'
-    cohort_identifier = "ppp1_raw_image_512x512"
+    parser = argparse.ArgumentParser(description='Run classification on all encodings')
+    parser.add_argument('--encoded-directory', type=str, required=True, help='Directory with encodings of the images')
+    parser.add_argument('--output-directory', type=str, required=True, help='Output directory to save training results to')
+    parser.add_argument('--annotation-csv', type=str, required=True, help='Annotation csv file with tissue labels')
+    parser.add_argument('--index-csv', type=str, required=True, help='Index CSV file with PPPB_ID and sample name mapping')
+    parser.add_argument('--expression-directory', type=str, required=True, help='Directory with expression data')
+    parser.add_argument('--patient-mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
+    parser.add_argument('--all-modalities', action='store_true', default=False, help='Whether to use all modalities')
+    parser.add_argument('--cohort-identifier', type=str, required=True, help='Cohort identifier for the images, e.g. ppp1_raw_image_512x512')
+    parser.add_argument('--module', type=str, default='all', help='Module to use for encoding, e.g. resnet_v2_50')
+    parser.add_argument('--classifier', type=str, default='all', help='Classifier to use for classification, e.g. LogisticRegression')
+    parser.add_argument('--n-jobs', type=int, default=4, help='Number of parallel jobs to run')
+    args = parser.parse_args()
 
     # Call the function with the modified parameters
     run_all_encodings_on_all_modalities(
-        annotation_csv,
-        index_csv,
-        expression_directory,
-        encoded_directory,
-        output_directory,
-        patient_mapping,
-        all_modalities=False,
-        cohort_identifier=cohort_identifier,
-        module=module,
-        classifier='all',
-        n_jobs=8
+        encoded_directory=args.encoded_directory,
+        output_directory=args.output_directory,
+        annotation_csv=args.annotation_csv,
+        index_csv=args.index_csv,
+        expression_directory=args.expression_directory,
+        patient_mapping= args.patient_mapping,
+        all_modalities=args.all_modalities,
+        cohort_identifier=args.cohort_identifier,
+        module=args.module,
+        classifier=args.classifier,
+        n_jobs=args.n_jobs
     )

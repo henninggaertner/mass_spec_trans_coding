@@ -9,11 +9,11 @@ from torchvision import models
 from torchmetrics import F1Score, Accuracy, Recall, Precision, AUROC
 
 HUB_MODELS = {
-    'mobilenet_v2': ("pytorch/vision:v0.10.0", "mobilenet_v2", ),
-    'resnet18': ("pytorch/vision:v0.10.0", "resnet18"),
+    #'mobilenet_v2': ("pytorch/vision:v0.10.0", "mobilenet_v2", ),
+    #'resnet18': ("pytorch/vision:v0.10.0", "resnet18"),
     'resnet101': ("pytorch/vision:v0.10.0", "resnet101"),
-    'resnet152': ("pytorch/vision:v0.10.0", "resnet152"),
-    'inception_v3': ("pytorch/vision:v0.10.0", "inception_v3"),
+    #'resnet152': ("pytorch/vision:v0.10.0", "resnet152"),
+    #'inception_v3': ("pytorch/vision:v0.10.0", "inception_v3"),
 }
 
 

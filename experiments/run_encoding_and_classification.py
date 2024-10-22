@@ -1,4 +1,5 @@
 """Encodes raw MS images with tensorflow and directly trains classifiers on the encoded features."""
+import argparse
 import traceback
 from functools import partial
 
@@ -6,7 +7,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader
-from run_learning_ppp1 import *
+from run_classification import *
 import traceback
 import os
 from functools import partial
@@ -19,7 +20,7 @@ from mstc.processing.model import MLPClassifier
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader
 from mstc.processing.model import HubModel
-from run_learning_ppp1 import homogenize_names, train_test_split_grouped
+from run_classification import homogenize_names, train_test_split_grouped
 assert sys.version_info >= (3, 6)
 os.environ["KMP_WARNINGS"] = "FALSE"
 
@@ -112,7 +113,9 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
     labels = pd.merge(labels, index_csv, on='PPPB_ID', how='inner')
 
     output_directory = os.path.abspath(os.path.expanduser(output_directory))
-    assert os.path.exists(output_directory)
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+        logger.info(f'Created output directory {output_directory}')
     data_dir = os.path.abspath(os.path.expanduser(input_directory))
 
     sample_set = set()
@@ -232,8 +235,8 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                     pipeline.fit(X_train, y_train)
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
-                        cv_df = pd.DataFrame(pipeline.steps[2][1].cv_results_)
-                    cv_index = int(pipeline.steps[2][1].best_index_)
+                        cv_df = pd.DataFrame(pipeline.steps[1][1].cv_results_)
+                    cv_index = int(pipeline.steps[1][1].best_index_)
                     training_scores = cv_df.loc[cv_index, [
                         'mean_test_AUC', 'mean_test_Accuracy', 'mean_test_F1',
                         'mean_train_AUC', 'mean_train_Accuracy', 'mean_train_F1'
@@ -247,8 +250,8 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                         'encoded_image_size':
                             encoded_image_size,
                         #'encoded_features_size': encoded_features_size,
-                        'non_varying_features':
-                            int(sum(pipeline.steps[0][1]._get_support_mask())),
+                        # 'non_varying_features':
+                        #     int(sum(pipeline.steps[0][1]._get_support_mask())),
                         'cohort_identifier': cohort_identifier,
                         'module': module,
                         'modality': modality,
@@ -260,7 +263,7 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                     # write to disk
                     cv_df.to_csv(cv_path)
                     with open(json_path, 'w') as open_file:
-                        json.dump(results, open_file)
+                        json.dump(results, open_file, default=str)
                     logger.info(f'{name}: {validation_scores}')
         except KeyboardInterrupt:
             raise KeyboardInterrupt
@@ -272,20 +275,20 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
 
 
 if __name__ == "__main__":
-    data_dir = ""
-    annotation_csv = data_dir+"annotation.csv"
-    index_csv = data_dir+"index.csv"
-    input_directory = data_dir+"ppp1_raw_image_512x512"
-    output_directory = data_dir+"output"
-    patient_mapping = data_dir+"inline-supplementary-material-5.xlsx"
+    parser = argparse.ArgumentParser(description='Run encoding on all modalities and train classifiers on the encoded features.')
+    parser.add_argument('--input_directory', type=str, required=True, help='Input directory with raw MS images to encode')
+    parser.add_argument('--output_directory', type=str, required=True, help='Output directory to save the encoded images and results to')
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for encoding images')
+    parser.add_argument('--index_csv', type=str, required=True, help='Index CSV file with PPPB_ID and sample name mapping')
+    parser.add_argument('--annotation_csv', type=str, required=True, help='Annotation csv file with tissue labels')
+    parser.add_argument('--patient_mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
+    args = parser.parse_args()
 
-    # Call the function with the modified parameters
     run_all_encodings_on_all_modalities(
-        input_directory=input_directory,
-        output_directory=output_directory,
-        batch_size=4,
-        index_csv=index_csv,
-        annotation_csv=annotation_csv,
-        patient_mapping=patient_mapping
+        input_directory=args.input_directory,
+        output_directory=args.output_directory,
+        batch_size=args.batch_size,
+        index_csv=args.index_csv,
+        annotation_csv=args.annotation_csv,
+        patient_mapping=args.patient_mapping
     )
-

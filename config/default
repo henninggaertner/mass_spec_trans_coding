@@ -1,0 +1,38 @@
+# this is where your enroot images (.sqsh files) are stored
+default_value ENROOT_IMAGE_HOME "/hpi/fs00/share/renard-uedl24/mstc-enroot"
+
+# output enroot tag
+default_value TARGET_TAG "mass-spec-trans-coding"
+
+# output enroot .sqsh file (usually ${TARGET_TAG}.sqsh)
+default_value TARGET_SQSH "${TARGET_TAG}.sqsh"
+
+# the script to run for installation
+default_value INSTALLATION_SCRIPT "00_install.sh"
+
+# the docker base image for the build script(s)
+default_value BASE_IMAGE "docker://nvidia/cuda:12.2.2-devel-ubuntu22.04"
+
+# !! TODO modify the following to your needs !!
+# send the e-mail about job changes to the following email (make sure you change it to your e-mail and username)
+default_value_for_user username EMAIL "<PLACEHOLDER>@hpi.de"
+
+# debug level (setting this to 1 will increase output for all commands after exporting this file)
+default_value VERBOSITY 1
+
+# the debug port for PyCharm Debugging (see README.md)
+export REMOTE_PYCHARM_DEBUG_PORT=12345
+
+# make enroot container writable (environment variable for enroot)
+export ENROOT_ROOTFS_WRITABLE=yes
+
+# remap to user instead of root (environment variable for enroot)
+#export ENROOT_REMAP_ROOT=yes
+
+# stop python from buffering its output (environment variable for python)
+export PYTHONUNBUFFERED=x
+
+# !! TODO modify the following to your needs !!
+export WANDB_API_KEY="<PLACEHOLDER>"
+export XDG_DATA_HOME="<PLACEHOLDER>/mstc-enroot-data"
+export XDG_CACHE_HOME="<PLACEHOLDER>/mstc-enroot-data"
