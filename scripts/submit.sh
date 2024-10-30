@@ -54,8 +54,7 @@ SLURM_RUN_FILE="${EXP_DIR}/slurm.sh"
     echo_variable_save PROJECT_ROOT
     echo_variable_save SCRIPT_ROOT
     echo_variable_save NUM_GPU
-    echo
-    echo ". \${SCRIPT_ROOT}/.internal-slurm-run.sh"
+    echo echo ". \${SCRIPT_ROOT}/.internal-slurm-run.sh"
 ) > "${SLURM_RUN_FILE}"
 
 do_if_verbosity 1 show_file "${SLURM_RUN_FILE}"
@@ -70,6 +69,10 @@ if ! [ -z "${EMAIL}" ] || [ "${1}" = "-h" ]; then
     EMAIL_ARGS="--mail-type ALL --mail-user ${EMAIL}"
 fi
 
+if [ "${NUM_GPU}" = "0" ]; then
+    export NVIDIA_VISIBLE_DEVICES="void"
+    echo "WARNING: Running without GPU!"
+fi
 CONSTRAINT_ARGS=""
 if ! [ -z "${CONSTRAINTS}" ]; then
     CONSTRAINT_ARGS="--constraint=${CONSTRAINTS}"

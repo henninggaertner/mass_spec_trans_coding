@@ -38,7 +38,7 @@ function install() {
 }
 function run_enroot_installation() {
       cp -v \
-        "${PROJECT_ROOT}/requirements.txt" \
+        "${PROJECT_ROOT}/src/requirements.txt" \
         "${PROJECT_ROOT}/install/"
     install_root "${INSTALLATION_SCRIPT}"
 }
