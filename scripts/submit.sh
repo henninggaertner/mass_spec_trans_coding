@@ -54,7 +54,7 @@ SLURM_RUN_FILE="${EXP_DIR}/slurm.sh"
     echo_variable_save PROJECT_ROOT
     echo_variable_save SCRIPT_ROOT
     echo_variable_save NUM_GPU
-    echo echo ". \${SCRIPT_ROOT}/.internal-slurm-run.sh"
+    echo ". \${SCRIPT_ROOT}/.internal-slurm-run.sh"
 ) > "${SLURM_RUN_FILE}"
 
 do_if_verbosity 1 show_file "${SLURM_RUN_FILE}"

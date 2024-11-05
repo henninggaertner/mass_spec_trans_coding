@@ -1,7 +1,4 @@
 """Run classification on a cleanly split dataset of features encoded with tensorflow models. Classical ML classifiers are used, but option to use an MLP is available."""
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 import glob
 import json
 import logging

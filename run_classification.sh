@@ -8,10 +8,12 @@ export PARTITION="magic"
 export ACCOUNT="renard"
 export TIME="2:0:0"
 export CONSTRAINTS="ARCH:X86"
-./scripts/quick-submit.sh -- python experiments/run_classification.py \
---input_directory /data/ppp1_raw_image_512x512 \
---output_directory /data/results/run_classification \
---batch_size 4 \
---index_csv /data/index.csv \
---annotation_csv /data/annotation.csv \
---patient_mapping /data/inline-supplementary-material-5.xlsx
+./scripts/quick-submit.sh -- python -m experiments.run_classification \
+--encoded-directory /data/resnet_v2_101 \
+--expression-directory /data/expression \
+--output-directory /output/results/run_classification \
+--index-csv /data/index.csv \
+--annotation-csv /data/annotation.csv \
+--patient-mapping /data/inline-supplementary-material-5.xlsx \
+--cohort-identifier ppp1_raw_image_512x512 \
+--n-jobs 16

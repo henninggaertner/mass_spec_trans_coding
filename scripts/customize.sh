@@ -45,6 +45,7 @@ function container_mounts() {
     echo "${EXP_DIR}/src":"/workspace"
     echo "${EXP_DIR}/logs":"/logs"
     echo "/hpi/fs00/share/renard-uedl24/mass_spec_trans_coding_data/data":"/data"
+    echo "/hpi/fs00/share/renard-uedl24/mass_spec_trans_coding_data/output":"/output"
 
     # if a path depends on a variable, we should make sure it is set with variable_required and provide a help string
     # variable_required IMAGENET_HOME "path should contain two folders 'val' and 'train' with the corresponding imagenet data"
