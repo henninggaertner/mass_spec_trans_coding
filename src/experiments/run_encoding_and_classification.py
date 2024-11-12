@@ -1,4 +1,6 @@
-"""Encodes raw MS images with tensorflow and directly trains classifiers on the encoded features."""
+"""Encodes raw MS images with tensorflow and directly trains classifiers on the encoded features.
+This results in (number of modalities) * (number of different encoders) * (number of different classifiers) results,
+although there is the option to only use the MS1 modality (itms). This is also the default."""
 import argparse
 import traceback
 from functools import partial
@@ -7,9 +9,11 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader
-from run_classification import *
+from .run_classification import HUB_MODULES, PATTERN, homogenize_names, RANDOM_STATE, SCORING, subdict, PARAMETER_GRID, train_test_split_grouped, compute_scores, sizedict
 import traceback
+import sys
 import os
+import pandas as pd
 from functools import partial
 
 from sklearn.preprocessing import LabelEncoder
@@ -20,89 +24,62 @@ from mstc.processing.model import MLPClassifier
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader
 from mstc.processing.model import HubModel
-from run_classification import homogenize_names, train_test_split_grouped
+from mstc.learning import generate_cross_validation_pipeline
 assert sys.version_info >= (3, 6)
 os.environ["KMP_WARNINGS"] = "FALSE"
+import glob
+import json
+import logging
+import os
+import re
+import sys
+import warnings
+import argparse
+from collections import OrderedDict
+from functools import partial
+import pandas as pd
+from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import GroupKFold
+import re
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, InputLayer
+from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
+from pathlib import Path
+from mstc.processing.model import MLPClassifier
+import pytorch_lightning as pl
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import LabelEncoder
 
-HUB_MODULES = pd.Series(OrderedDict([
-    # 1-10
-    ('inception_v3_imagenet', 'https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1'),  # noqa
-    ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2'),  # noqa
-    ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
-    ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
-    ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
-    ('resnet_v2_152', 'https://tfhub.dev/google/imagenet/resnet_v2_152/feature_vector/1'),  # noqa
-    ('mobilenet_v2_140_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2'),  # noqa
-    ('pnasnet_large', 'https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2'),  # noqa
-    ('mobilenet_v2_035_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_128/feature_vector/2'),  # noqa
-    ('mobilenet_v1_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/feature_vector/1'),  # noqa
-    # 11-20
-    ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
-    ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
-    # # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
-    ('resnet_v2_101', 'https://tfhub.dev/google/imagenet/resnet_v2_101/feature_vector/1'),  # noqa
-    # # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
-    ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
-    ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
-    ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
-    ('mobilenet_v2_035_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2'),  # noqa
-    ('mobilenet_v2_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_224/feature_vector/2'),  # noqa
-    # 21-30
-    ('mobilenet_v2_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_128/feature_vector/2'),  # noqa
-    ('nasnet_mobile', 'https://tfhub.dev/google/imagenet/nasnet_mobile/feature_vector/1'),  # noqa
-    ('inception_v3_inaturalist', 'https://tfhub.dev/google/inaturalist/inception_v3/feature_vector/1'),  # noqa
-    ('mobilenet_v1_025_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_128/feature_vector/1'),  # noqa
-    ('mobilenet_v2_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v2_050_128/feature_vector/2'),  # noqa
-    ('inception_v2', 'https://tfhub.dev/google/imagenet/inception_v2/feature_vector/1'),  # noqa
-    ('mobilenet_v1_025_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_025_224/feature_vector/1'),  # noqa
-    ('mobilenet_v2_075_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_96/feature_vector/2'),  # noqa
-    ('mobilenet_v1_100_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_128/feature_vector/1'),  # noqa
-    ('mobilenet_v1_050_128', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_128/feature_vector/1'),  # noqa
-    # other
-    ('amoebanet_a_n18_f448', 'https://tfhub.dev/google/imagenet/amoebanet_a_n18_f448/feature_vector/1'),  # noqa
-]))
+import pandas as pd
+import numpy as np
+import plac
+import xarray as xr
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score, f1_score, roc_auc_score,
+    brier_score_loss, log_loss,
+    confusion_matrix, recall_score
+)
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
+from xgboost.sklearn import XGBClassifier
+
+from mstc.learning import generate_cross_validation_pipeline
+from mstc.processing import Flatten, Stacker
 
 
 #tf.logging.set_verbosity('CRITICAL')
+import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 os.environ["KMP_WARNINGS"] = "FALSE"
 
 
 
-PATTERN = re.compile(
-    r'(?P<sample_name>.+?)(\.mzXML\.gz\.image\.0\.)'
-    r'(?P<modality>(itms)|(ms2\.precursor=\d{3,}\.\d{2}))'
-    r'\.png'
-)
-
-def pytorch_mlp(X_train, y_train, X_test, y_test, train_patient_ids, nsplits=5):
-    from torch.utils.data import DataLoader, TensorDataset
-    import torch
-    import torch.nn as nn
-    X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
-    y_train_tensor = torch.tensor(LabelEncoder().fit_transform(y_train), dtype=torch.long)
-    repeated_group_kfold = GroupKFold(n_splits=nsplits)
-    fold_results = []
-    for fold, (train_index, val_index) in enumerate(repeated_group_kfold.split(X_train, y_train, groups=train_patient_ids)):
-        print(f"fold: {fold}")
-        X_train_fold, X_val_fold = X_train_tensor[train_index], X_train_tensor[val_index]
-        y_train_fold, y_val_fold = y_train_tensor[train_index], y_train_tensor[val_index]
-        train_dataset = TensorDataset(X_train_fold, y_train_fold)
-        val_dataset = TensorDataset(X_val_fold, y_val_fold)
-        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=4)
-
-        model = MLPClassifier(input_size=X_train.shape[1], num_classes=len(np.unique(y_train)))
-        trainer = pl.Trainer(max_epochs=10, gpus=1)
-        trainer.fit(model, train_loader, val_loader)
-        fold_results.append(trainer.test(model, val_loader))
-
-    return fold_results
-
-
-
-def run_all_encodings_on_all_modalities(input_directory, output_directory, batch_size=4, index_csv=None, annotation_csv=None, patient_mapping=None, n_jobs=8):
+def run_all_encodings_on_all_modalities(input_directory, output_directory, batch_size=4, index_csv=None, annotation_csv=None, patient_mapping=None, n_jobs=8, all_modalities=False):
     labels = pd.read_csv(annotation_csv)
     index_csv = pd.read_csv(index_csv)
     patient_mapping = pd.read_excel(patient_mapping, engine='openpyxl', skiprows=1, index_col="Run")
@@ -187,6 +164,8 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
             def is_encoding_required(pattern):
                 """function to filter glob_patterns with logging side effect"""
                 modality = pattern.split('*')[1]
+                if not all_modalities and modality != 'itms':
+                    return False
                 if not os.path.exists(os.path.join(
                     output_directory,
                     cohort_identifier + '-' + module + '-' + modality + '.nc'
@@ -276,12 +255,13 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run encoding on all modalities and train classifiers on the encoded features.')
-    parser.add_argument('--input_directory', type=str, required=True, help='Input directory with raw MS images to encode')
-    parser.add_argument('--output_directory', type=str, required=True, help='Output directory to save the encoded images and results to')
-    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for encoding images')
-    parser.add_argument('--index_csv', type=str, required=True, help='Index CSV file with PPPB_ID and sample name mapping')
-    parser.add_argument('--annotation_csv', type=str, required=True, help='Annotation csv file with tissue labels')
-    parser.add_argument('--patient_mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
+    parser.add_argument('--input-directory', type=str, required=True, help='Input directory with raw MS images to encode')
+    parser.add_argument('--output-directory', type=str, required=True, help='Output directory to save the encoded images and results to')
+    parser.add_argument('--batch-size', type=int, default=4, help='Batch size for encoding images')
+    parser.add_argument('--index-csv', type=str, required=True, help='Index CSV file with PPPB_ID and sample name mapping')
+    parser.add_argument('--annotation-csv', type=str, required=True, help='Annotation csv file with tissue labels')
+    parser.add_argument('--patient-mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
+    parser.add_argument('--all-modalities', action='store_true', default=False, help='Whether to use all modalities')
     args = parser.parse_args()
 
     run_all_encodings_on_all_modalities(
@@ -290,5 +270,6 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         index_csv=args.index_csv,
         annotation_csv=args.annotation_csv,
-        patient_mapping=args.patient_mapping
+        patient_mapping=args.patient_mapping,
+        all_modalities=args.all_modalities
     )
