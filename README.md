@@ -35,7 +35,7 @@ The data is usually analysed with specialized tools to calculate quantities of p
 
 ### The mstc package
 [![Build Status](https://travis-ci.com/PhosphorylatedRabbits/mass_spec_trans_coding.svg?branch=master)](https://travis-ci.com/PhosphorylatedRabbits/mass_spec_trans_coding)  
-There is [Documention](https://phosphorylatedrabbits.github.io/mass_spec_trans_coding/) of the package code.
+There is [Documention](https://phosphorylatedrabbits.github.io/mass_spec_trans_coding/) of the package code. [might be outdated, as the experiments were changed]
 
 The processing subpackage defines operations to define a processing pipeline from reading, encoding, transforming, etc.
 It's not specific to MS.
@@ -44,96 +44,60 @@ It's also convenient to handle indexes and attributes.
 
 The learning subpackage only defines a cross validation learning pipeline.
 
-#### Installation
+## Installation
 
-The quickest way to install the package would be
+```bash
+git clone https://github.com/henninggaertner/mass_spec_trans_coding
+cd mass_spec_trans_coding
+# Now you should customize the config files, see below
+# ...
+# To build the container, run 
+chmod +x scripts/*.sh
+./scripts/build-image.sh
 ```
-pip install git+https://github.com/PhosphorylatedRabbits/mass_spec_trans_coding@master
-```
-or from the `git clone`d directory
-```
-pip install .
-```
+Once installed, it can be run interactively with scripts/interactive.sh, but allocate resources with `salloc`
+beforehand.
 
-But to run the experiments, there are additional dependencies. See [Environment](#environment)
+## Configuration
+First, the `<PLACEHOLDER>` in `config/default` should be replaced with appropriate values.
+Furthermore, to mount additional directories in the container, the `scripts/customize.sh` script can be adjusted, for
+example to mount directories containing e.g. MS data in the container. By default, the `renard-uedl24/mass_spec_trans_coding_data/data` directory on the
+delab is mounted to `/data` in the container. To customize the mounting, the `scripts/customize.sh` script can be
+adjusted.
 
-### Experiments
-The scripts for encoding, learning and evaluation as well as result exploration and plotting the manuscripts figures can be found in the experiments directory.  
+## Experiments
+The scripts for encoding+classification, classification and training on raw images as well as result exploration and plotting the manuscripts figures can be found in the experiments directory.  
 These scripts are specifically tailored to the dataset. Some paths are hardcoded to data/ or experiments/, so edit them or make sure to run from the repo root and download the [Data](#data) accordingly.
 
-```console
-python experiments/run_encoding.py --help
-usage: run_encoding.py [-h] input_directory output_directory [batch_size]
+#### run_encoding_and_classification.py
+- slurm job script: `run_encoding_and_classification.sh`
+-  this uses tensorflow to create the feature encodings and subsequently train ML models on them
 
-positional arguments:
-  input_directory
-  output_directory
-  batch_size        [4]
+#### run_classification.py
+- slurm job script: `run_classification.sh`
+- this is the same as the original run_learning_ppp1.py script, but with the data leakage fixed. it can still be
+  reverted to use the old version by (un)commenting the respective lines
+- contains the 3 layer MLP classifier (info: for this to work, the variance threshold might need to be removed, as the
+  number of features is varying between runs)
 
-optional arguments:
-  -h, --help        show this help message and exit
-```
+#### run_training_raw_images.py
+- slurm job script: `run_training_raw_images.sh`
+- this was the attempt to port the encoding+learning pipeline to pytorch
+- it creates one model, which consists of the encoder and the classifier, all in one
+- the encoder can optionally be unfrozen for fine-tuning on creation of the model
 
-```console
-python experiments/run_learning_ppp1.py --help
-usage: run_learning_ppp1.py [-h] [-all]
-                            [-cohort-identifier {ppp1_raw_image_2048x2048,ppp1_raw_image_512x512,ppp1_cropped_image_2048x973,ppp1_cropped_image_512x243}]
-                            [-module all] [-classifier all] [-n-jobs 1]
-                            annotation_csv index_csv expression_directory
-                            encoded_directory output_directory
-
-positional arguments:
-  annotation_csv
-  index_csv
-  expression_directory
-  encoded_directory
-  output_directory
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -all, --all-modalities
-                        use not only ms1 but also all ms2
-  -cohort-identifier {ppp1_raw_image_2048x2048,ppp1_raw_image_512x512,ppp1_cropped_image_2048x973,ppp1_cropped_image_512x243}
-                        cohort_directory of original image data
-  -module all           name of single TF Hub module used for encoding or
-                        "expressions" (default: all)
-  -classifier all       name of single classifier to use for classification
-                        (default: all)
-  -n-jobs 1             number of parallel jobs in GridSearch (default: 1)
-```
-
-The results can be aggregated with `experiments/collect_results.py` and explored with `experiments/results_ppp1.py`
-
-The `experiments/manuscript/` directory contains everything to recreate the figures in the manuscript.
-
-#### Environment
-The experiments directory is not included in the mstc package, so you will need a clone.
-```
-git clone https://github.com/PhosphorylatedRabbits/mass_spec_trans_coding.git
-cd mass_spec_trans_coding
-```
-The full environment to run the scripts is defined in `requirements.txt`.  
-However, e.g. `xgboost` from pypi fails on some systems, so the recommended way is a conda environment.  
-```
-conda env create -f conda.yml
-conda activate mstc
-pip install .
-```
-
-### Data
+## Data
 The data used for the experiments consists of 458 tumor and 455 normal prostate samples. Please refer to the [manuscript](#references) for more information.
 
-Most data used in the repo can be downloaded from [Box](https://ibm.box.com/v/mstc-supplementary).  
-Available are
+In order to run the experiments, you need to download some files from [Box](https://ibm.box.com/v/mstc-supplementary). Available are
 - rasterized MS images
 - encoded vectors
 - tumor/normal label
 - classification results
-
-Whereas
-- original MS mXML data
-- protein/peptide expression values  
-cannot be made available publicly.
+The data needed includes "index.csv" and "annotations.csv" from the "labels" directory.
+The MS images can be downloaded from the "split_archives" directory. They need to be unpacked though.
+A copy is available in the share on delab (renard-uedl24) in the directory `mass_spec_trans_coding_data/data/`.
+Additional metadata for the patient mapping was used, available for download [here](https://www.life-science-alliance.org/content/lsa/7/2/e202302146/DC5/embed/inline-supplementary-material-5.xlsx?download=true).
 
 ### References
 This work is published in [Bioinformatics](https://doi.org/10.1093/bioinformatics/btab311) through ISMB/ECCB 21 proceedings. For a typeable url, use [ibm.biz/mstc-paper](https://ibm.biz/mstc-paper).
