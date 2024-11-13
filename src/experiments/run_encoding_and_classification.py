@@ -261,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument('--index-csv', type=str, required=True, help='Index CSV file with PPPB_ID and sample name mapping')
     parser.add_argument('--annotation-csv', type=str, required=True, help='Annotation csv file with tissue labels')
     parser.add_argument('--patient-mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
-    parser.add_argument('--all-modalities', action='store_true', default=False, help='Whether to use all modalities')
+    parser.add_argument('--all-modalities', action='store_true', default=False, help='Whether to use all modalities or only MS1')
     args = parser.parse_args()
 
     run_all_encodings_on_all_modalities(

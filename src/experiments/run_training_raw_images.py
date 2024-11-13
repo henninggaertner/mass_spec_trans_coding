@@ -13,7 +13,7 @@ import numpy as np
 
 from mstc.processing import Compose, HubEncoder, Map, PNGReader, HubModel, ValidationCallback
 from mstc.processing.model import HUB_MODELS
-from run_classification import homogenize_names, train_test_split_grouped
+from .run_classification import homogenize_names, train_test_split_grouped
 import pandas as pd
 import pytorch_lightning as pl
 import os
@@ -31,7 +31,7 @@ PATTERN = re.compile(
 )
 
 
-def run_all_encodings_on_all_modalities(input_directory, output_directory, batch_size=4, index_csv=None, annotation_csv=None, patient_mapping=None, n_jobs=8, freeze_base_model=False, n_splits=5):
+def run_all_encodings_on_all_modalities(input_directory, output_directory, batch_size=4, index_csv=None, annotation_csv=None, patient_mapping=None, n_jobs=8, freeze_base_model=False, n_splits=5, all_modalities=False):
     labels = pd.read_csv(annotation_csv)
     index_csv = pd.read_csv(index_csv)
     patient_mapping = pd.read_excel(patient_mapping, engine='openpyxl', skiprows=1, index_col="Run")
@@ -85,6 +85,8 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
             def is_encoding_required(pattern):
                 """function to filter glob_patterns with logging side effect"""
                 modality = pattern.split('*')[1]
+                if not all_modalities and modality != 'itms':
+                    return False
                 if not os.path.exists(os.path.join(
                         output_directory,
                         cohort_identifier + '-' + module + '-' + modality + '.nc'
@@ -124,7 +126,7 @@ def run_all_encodings_on_all_modalities(input_directory, output_directory, batch
                 train_patient_ids = [pppb_to_patient[sample] for sample in train_index]
                 # TRAINING
                 dataloader_args = {'batch_size': 2}
-                trainer_args = {'max_epochs': 5, 'accelerator': 'gpu'}
+                trainer_args = {'max_epochs': 5, 'accelerator': 'gpu', 'enable_progress_bar': False}
                 # trainer_args['callbacks'] = ValidationCallback()
                 trainer_args['val_check_interval'] = 1.0
 
@@ -235,6 +237,7 @@ if __name__ == "__main__":
     parser.add_argument('--patient-mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
     parser.add_argument('--freeze-base-model', action='store_true', help='Whether to freeze the base model')
     parser.add_argument('--n-splits', type=int, default=5, help='Number of splits for cross-validation')
+    parser.add_argument('--all-modalities', action='store_true', default=False, help='Whether to use all modalities or only MS1')
     args = parser.parse_args()
 
     # Call the function with the modified parameters
