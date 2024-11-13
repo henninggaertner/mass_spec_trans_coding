@@ -14,10 +14,9 @@ def json_load(filepath):
 
 seed_dir = 'seed_7899463'
 
-DATA_DIR = os.path.join('data/classification_results',
-                        seed_dir)
-DF_PATH = os.path.join('experiments/manuscript/',
-                       'classification_results.csv')
+DATA_DIR = os.path.join('/data/output/dirty_split/')
+print(os.path.abspath(DATA_DIR))
+DF_PATH = os.path.join('/data/output/dirty_split/', 'classification_results.csv')
 dicts = [
     json_load(filepath)
     for filepath in glob.glob(os.path.join(DATA_DIR, '*.json'))
@@ -29,7 +28,7 @@ dicts = [
 #     for filepath in glob.glob(os.path.join(DATA_DIR, '*.csv'))
 # ]
 
-df = pd.io.json.json_normalize(dicts)
+df = pd.json_normalize(dicts)
 df.columns = [
     c.replace('.', '_').replace('validation_scores_', '') for c in df.columns]
 

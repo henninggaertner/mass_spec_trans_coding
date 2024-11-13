@@ -1,4 +1,4 @@
-"""Use encoded features for specific classification task."""
+"""Run classification on a cleanly split dataset of features encoded with tensorflow models. Classical ML classifiers are used, but option to use an MLP is available."""
 import glob
 import json
 import logging
@@ -6,14 +6,23 @@ import os
 import re
 import sys
 import warnings
+import argparse
 from collections import OrderedDict
 from functools import partial
 import pandas as pd
 from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import GroupKFold
 import re
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, InputLayer
-from scikeras.wrappers import KerasClassifier
+from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
+from pathlib import Path
+from mstc.processing.model import MLPClassifier
+import pytorch_lightning as pl
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import LabelEncoder
 
 import pandas as pd
 import numpy as np
@@ -42,7 +51,7 @@ logger.setLevel(logging.INFO)
 HUB_MODULES = pd.Series(OrderedDict([
     # 1-10
     ('inception_v3_imagenet', 'https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1'),  # noqa
-    # # ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2')  # noqa
+    # ('mobilenet_v2', 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2')  # noqa
     ('mobilenet_v2_100_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/feature_vector/2'),  # noqa
     ('inception_resnet_v2', 'https://tfhub.dev/google/imagenet/inception_resnet_v2/feature_vector/1'),  # noqa
     ('resnet_v2_50', 'https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1'),  # noqa
@@ -54,9 +63,9 @@ HUB_MODULES = pd.Series(OrderedDict([
     # 11-20
     ('mobilenet_v1_050_224', 'https://tfhub.dev/google/imagenet/mobilenet_v1_050_224/feature_vector/1'),  # noqa
     ('mobilenet_v2_075_224', 'https://tfhub.dev/google/imagenet/mobilenet_v2_075_224/feature_vector/2'),  # noqa
-    # # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
+    # ('inception_v3', 'https://tfhub.dev/google/tf2-preview/inception_v3/feature_vector/2')  # noqa
     ('resnet_v2_101', 'https://tfhub.dev/google/imagenet/resnet_v2_101/feature_vector/1'),  # noqa
-    # # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
+    # ('quantops', 'https://tfhub.dev/google/imagenet/mobilenet_v1_100_224/quantops/feature_vector/1'),  # noqa
     ('nasnet_large', 'https://tfhub.dev/google/imagenet/nasnet_large/feature_vector/1'),  # noqa
     ('mobilenet_v2_100_96', 'https://tfhub.dev/google/imagenet/mobilenet_v2_100_96/feature_vector/2'),  # noqa
     ('inception_v1', 'https://tfhub.dev/google/imagenet/inception_v1/feature_vector/1'),  # noqa
@@ -83,16 +92,52 @@ PATTERN = re.compile(
     r'\.png'
 )
 
+def pytorch_mlp(X_train, y_train, X_test, y_test, train_patient_ids, nsplits=5):
+    X_train_tensor = torch.tensor(X_train.values, dtype=torch.float32)
+    y_train_tensor = torch.tensor(LabelEncoder().fit_transform(y_train), dtype=torch.long)
+    repeated_group_kfold = GroupKFold(n_splits=nsplits)
+    fold_results = []
+    for fold, (train_index, val_index) in enumerate(repeated_group_kfold.split(X_train, y_train, groups=train_patient_ids)):
+        print(f"fold: {fold}")
+        X_train_fold, X_val_fold = X_train_tensor[train_index], X_train_tensor[val_index]
+        y_train_fold, y_val_fold = y_train_tensor[train_index], y_train_tensor[val_index]
+        train_dataset = TensorDataset(X_train_fold, y_train_fold)
+        val_dataset = TensorDataset(X_val_fold, y_val_fold)
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+
+        model = MLPClassifier(input_size=X_train.shape[1], num_classes=len(np.unique(y_train)))
+        trainer = pl.Trainer(max_epochs=10, gpus=1)
+        trainer.fit(model, train_loader, val_loader)
+        fold_results.append(trainer.test(model, val_loader))
+
+    return fold_results
 def create_model():
     model = Sequential()
-    model.add(InputLayer(input_shape=(936,)))
+    model.add(InputLayer(input_shape=(2048,)))
     model.add(Dense(512, activation='relu'))
     model.add(Dense(64, activation='relu'))
     model.add(Dense(1, activation='sigmoid'))
     model.compile(loss='binary_crossentropy', optimizer='adam')
     return model
 
+def create_model_linear():
+    model = Sequential()
+    model.add(InputLayer(input_shape=(2048,)))
+    model.add(Dense(1, activation='sigmoid'))
+    model.compile(loss='binary_crossentropy', optimizer='adam')
+    return model
+def is_a_path(string):
+    try:
+        p = Path(string)
+        return p.exists() or ("/" in string or "\\" in string)
+    except:
+        return False
+
 def homogenize_names(sample_name):
+    # if sample_name is a file_path, extract the base_file_name without any file extensions
+    if is_a_path(sample_name):
+        sample_name = str(Path(sample_name).name).split(".")[0]
     # if CP\d is encountered, replace it with CPP\d
     sample_name = re.sub(r'CP(\d+)', r'CPP\1', sample_name)
     # if string contains guot in any case, remove it
@@ -250,6 +295,10 @@ def compute_scores(y, X, classifier):
         'Recall': recall,
         'Precision': precision,
         'Specificity': specificity,
+        'False Positive': fp,
+        'False Negative': fn,
+        'True Positive': tp,
+        'True Negative': tn,
     }
 
 
@@ -293,7 +342,9 @@ def run_all_encodings_on_all_modalities(
     module_selection = module
     classifier_selection = classifier
     output_directory = os.path.abspath(os.path.expanduser(output_directory))
-    assert os.path.exists(output_directory)
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+        logger.info(f'Created output directory {output_directory}')
     data_dir = os.path.abspath(os.path.expanduser(encoded_directory))
 
     # annotation
@@ -341,6 +392,7 @@ def run_all_encodings_on_all_modalities(
         number_of_jobs=n_jobs,
         scoring=SCORING,
         refit='AUC',
+        variance_threshold=True
     )
 
     classifiers = {
@@ -360,10 +412,14 @@ def run_all_encodings_on_all_modalities(
             XGBClassifier(),
             subdict(PARAMETER_GRID, ['n_estimators']),
         ),
-        '3LP': classifier_pipeline(
-            KerasClassifier(build_fn=create_model, epochs=100, batch_size=10, verbose=0),
-            {},
-        )
+        # '3LP': classifier_pipeline(
+        #     KerasClassifier(build_fn=create_model, epochs=10, batch_size=16, verbose=0),
+        #     {},
+        # ),
+        # '1LP': classifier_pipeline(
+        #     KerasClassifier(build_fn=create_model_linear, epochs=10, batch_size=16, verbose=0),
+        #     {},
+        # )
 
     }
     if classifier_selection != 'all':
@@ -415,6 +471,11 @@ def run_all_encodings_on_all_modalities(
                 f'{module} has only {n_modalities}/101 modalities available'
             )
             module += '_incomplete'
+        if n_modalities == 0:
+            logger.critical(
+                f'No classification of {module}; no modalities found'
+            )
+            continue
         encoded_features_size = encoded_modalities[0][1].sizes['hub_feature']
 
         encoded_modalities.sort(key=lambda key_value: key_value[0])
@@ -452,12 +513,13 @@ def run_all_encodings_on_all_modalities(
         #    stratify=y
         #)
         # NEW SPLIT
-        train_index, test_index = train_test_split_grouped(index, pppb_to_patient, test_size=0.3, random_state=RANDOM_STATE)
-        X_train = encoded_module.loc[train_index].values
-        X_test = encoded_module.loc[test_index].values
-        y_train = y.loc[train_index]
-        y_test = y.loc[test_index]
+        train_index, test_index = train_test_split_grouped(encoded_module.indexes['sample'], pppb_to_patient, test_size=0.3)
+        # SPLITTING
+        X_train, X_test = encoded_module.sel(sample=train_index), encoded_module.sel(sample=test_index)
+        y_train, y_test = y.loc[train_index], y.loc[test_index]
 
+        # train_patient_ids = [pppb_to_patient[pppb] for pppb in train_index]
+        # pytorch_mlp(X_train, y_train, X_test, y_test, train_patient_ids)
 
         encoded_image_size = sizedict(
             encoded_module.attrs['encoded_image_size']
@@ -487,7 +549,7 @@ def run_all_encodings_on_all_modalities(
                 'mean_test_AUC', 'mean_test_Accuracy', 'mean_test_F1',
                 'mean_train_AUC', 'mean_train_Accuracy', 'mean_train_F1'
             ]].to_dict()
-            # run valitation
+            # run validation
             validation_scores = compute_scores(y_test, X_test, pipeline)
             # collect results
             results = {
@@ -509,8 +571,11 @@ def run_all_encodings_on_all_modalities(
             # write to disk
             cv_df.to_csv(cv_path)
             with open(json_path, 'w') as open_file:
-                json.dump(results, open_file)
+                json.dump(results, open_file, default=str)
             logger.info(f'{name}: {validation_scores}')
+
+    # check if the expression directory is empty, as the data is not publicly provided, a skip is necessary
+    make_expression_iterator = make_expression_iterator and any(os.scandir(expression_directory))
 
     if make_expression_iterator:
         expression_dict = read_expression(
@@ -590,29 +655,31 @@ def run_all_encodings_on_all_modalities(
 
 
 if __name__ == "__main__":
-    data_dir = "/home/henning/mass_spec_trans_coding/data/" # TODO magic path
-    annotation_csv = data_dir+"annotation.csv"
-    index_csv = data_dir+"index.csv"
-    expression_directory = data_dir+"expression"
-    encoded_directory = data_dir+"resnet_v2_101"
-    output_directory = data_dir+"output"
-    patient_mapping = data_dir+"inline-supplementary-material-5.xlsx"
-
-    # Set the module to 'resnet_v2_50' and cohort_identifier to the directory name of the 512x12 encoded data
-    module = 'resnet_v2_101'
-    cohort_identifier = "ppp1_raw_image_512x512"
+    parser = argparse.ArgumentParser(description='Run classification on all encodings')
+    parser.add_argument('--encoded-directory', type=str, required=True, help='Directory with encodings of the images')
+    parser.add_argument('--output-directory', type=str, required=True, help='Output directory to save training results to')
+    parser.add_argument('--annotation-csv', type=str, required=True, help='Annotation csv file with tissue labels')
+    parser.add_argument('--index-csv', type=str, required=True, help='Index CSV file with PPPB_ID and sample name mapping')
+    parser.add_argument('--expression-directory', type=str, required=True, help='Directory with expression data')
+    parser.add_argument('--patient-mapping', type=str, required=True, help='Patient mapping file (.xlsx) with PPPB_ID and patient ID mapping')
+    parser.add_argument('--all-modalities', action='store_true', default=False, help='Whether to use all modalities')
+    parser.add_argument('--cohort-identifier', type=str, required=True, help='Cohort identifier for the images, e.g. ppp1_raw_image_512x512')
+    parser.add_argument('--module', type=str, default='all', help='Module to use for encoding, e.g. resnet_v2_50')
+    parser.add_argument('--classifier', type=str, default='all', help='Classifier to use for classification, e.g. LogisticRegression')
+    parser.add_argument('--n-jobs', type=int, default=4, help='Number of parallel jobs to run')
+    args = parser.parse_args()
 
     # Call the function with the modified parameters
     run_all_encodings_on_all_modalities(
-        annotation_csv,
-        index_csv,
-        expression_directory,
-        encoded_directory,
-        output_directory,
-        patient_mapping,
-        all_modalities=False,
-        cohort_identifier=cohort_identifier,
-        module=module,
-        classifier='all',
-        n_jobs=8
+        encoded_directory=args.encoded_directory,
+        output_directory=args.output_directory,
+        annotation_csv=args.annotation_csv,
+        index_csv=args.index_csv,
+        expression_directory=args.expression_directory,
+        patient_mapping= args.patient_mapping,
+        all_modalities=args.all_modalities,
+        cohort_identifier=args.cohort_identifier,
+        module=args.module,
+        classifier=args.classifier,
+        n_jobs=args.n_jobs
     )

@@ -5,7 +5,7 @@ setup(
     name='mstc',
     version='0.2',
     description='Transferred encoding of mass spectrometry images.',
-    long_description=open('README.md').read(),
+    #long_description=open('../README.md').read(),
     url='https://github.com/PhosphorylatedRabbits/mass_spec_trans_coding',
     author='Joris Cadow',
     author_email='joriscadow@gmail.com',
